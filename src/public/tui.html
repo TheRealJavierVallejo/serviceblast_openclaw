@@ -97,7 +97,11 @@
 
     function getAuthProtocol() {
       if (!password) return [];
-      const encoded = btoa(`user:${password}`);
+      // Fix for WebSocket subprotocol invalid character error
+      // The browser's WebSocket implementation doesn't allow '=' padding characters
+      // in subprotocols. So we must remove them.
+      let encoded = btoa(`user:${password}`);
+      encoded = encoded.replace(/=/g, ''); 
       return [`auth-${encoded}`];
     }
 
@@ -127,47 +131,57 @@
       setStatus("connecting", "Connecting...");
       showOverlay(`<div class="spinner"></div><h2>Connecting to terminal</h2><p>Establishing session...</p>`);
 
-      ws = new WebSocket(getWsUrl(), getAuthProtocol());
+      try {
+        ws = new WebSocket(getWsUrl(), getAuthProtocol());
 
-      ws.onopen = () => {
-        reconnectCount = 0;
-        setStatus("connected", "Connected");
-        hideOverlay();
-        fitAddon.fit();
-        const { cols, rows } = term;
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      };
+        ws.onopen = () => {
+          reconnectCount = 0;
+          setStatus("connected", "Connected");
+          hideOverlay();
+          fitAddon.fit();
+          const { cols, rows } = term;
+          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        };
 
-      ws.onmessage = e => {
-        term.write(e.data);
-      };
+        ws.onmessage = e => {
+          term.write(e.data);
+        };
 
-      ws.onerror = () => {
-        setStatus("error", "Connection error");
-      };
+        ws.onerror = () => {
+          setStatus("error", "Connection error");
+        };
 
-      ws.onclose = e => {
-        setStatus("error", `Disconnected (${e.code})`);
-        if (NO_RECONNECT_CODES.has(e.code)) {
-          const messages = {
-            4001: "<h2>Session conflict</h2><p>Another terminal session is already active. Close it first.</p>",
-            4002: "<h2>Session expired</h2><p>The terminal session timed out due to inactivity.</p>",
-            4003: "<h2>Terminal disabled</h2><p>The Web TUI feature is not enabled on this deployment.</p>",
-            1008: "<h2>Authentication failed</h2><p>Incorrect password.</p>",
-          };
-          if (e.code === 1008) password = "";
-          showOverlay(messages[e.code] ?? "<h2>Disconnected</h2><p>This session cannot be resumed.</p>");
-          return;
-        }
-        if (reconnectCount < MAX_RECONNECT) {
-          reconnectCount++;
-          const delay = reconnectCount * 1500;
-          setStatus("connecting", `Reconnecting (${reconnectCount}/${MAX_RECONNECT})...`);
-          setTimeout(connect, delay);
-        } else {
-          showOverlay("<h2>Disconnected</h2><p>Could not reconnect. <a href='' style='color:#6366f1'>Reload page</a> to try again.</p>");
-        }
-      };
+        ws.onclose = e => {
+          setStatus("error", `Disconnected (${e.code})`);
+          if (NO_RECONNECT_CODES.has(e.code)) {
+            const messages = {
+              4001: "<h2>Session conflict</h2><p>Another terminal session is already active. Close it first.</p>",
+              4002: "<h2>Session expired</h2><p>The terminal session timed out due to inactivity.</p>",
+              4003: "<h2>Terminal disabled</h2><p>The Web TUI feature is not enabled on this deployment.</p>",
+              1008: "<h2>Authentication failed</h2><p>Incorrect password.</p>",
+            };
+            if (e.code === 1008) password = "";
+            showOverlay(messages[e.code] ?? "<h2>Disconnected</h2><p>This session cannot be resumed.</p>");
+            return;
+          }
+          if (reconnectCount < MAX_RECONNECT) {
+            reconnectCount++;
+            const delay = reconnectCount * 1500;
+            setStatus("connecting", `Reconnecting (${reconnectCount}/${MAX_RECONNECT})...`);
+            setTimeout(connect, delay);
+          } else {
+            showOverlay("<h2>Disconnected</h2><p>Could not reconnect. <a href='' style='color:#6366f1'>Reload page</a> to try again.</p>");
+          }
+        };
+      } catch (err) {
+        console.error("WebSocket connection error:", err);
+        showOverlay(`<h2>Connection Error</h2><p>${err.message}</p>
+        <button id="retry-btn" style="background:#6366f1;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;margin-top:10px;">Retry</button>`);
+        setTimeout(() => {
+          const btn = document.getElementById("retry-btn");
+          if (btn) btn.addEventListener("click", connect);
+        }, 50);
+      }
 
       term.onData(data => {
         if (ws && ws.readyState === WebSocket.OPEN) {
