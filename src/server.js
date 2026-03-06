@@ -1278,6 +1278,20 @@ app.get("/tui", requireSetupAuth, (_req, res) => {
   res.sendFile(path.join(process.cwd(), "src", "public", "tui.html"));
 });
 
+// Alias for /terminal
+app.get("/terminal", requireSetupAuth, (_req, res) => {
+  if (!ENABLE_WEB_TUI) {
+    return res
+      .status(403)
+      .type("text/plain")
+      .send("Web TUI is disabled. Set ENABLE_WEB_TUI=true to enable it.");
+  }
+  if (!isConfigured()) {
+    return res.redirect("/setup");
+  }
+  res.sendFile(path.join(process.cwd(), "src", "public", "tui.html"));
+});
+
 app.get("/setup/export", requireSetupAuth, async (_req, res) => {
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
