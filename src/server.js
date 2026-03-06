@@ -6,7 +6,7 @@ import path from "node:path";
 
 import express from "express";
 import httpProxy from "http-proxy";
-import pty from "node-pty";
+import pty from "node:pty";
 import { WebSocketServer } from "ws";
 
 const PORT = Number.parseInt(process.env.PORT ?? "8080", 10);
@@ -858,10 +858,14 @@ function verifyTuiAuth(req) {
   }
   // Check WebSocket subprotocol for browser clients (browsers can't set custom headers)
   const protocols = (req.headers["sec-websocket-protocol"] || "").split(",").map(s => s.trim());
-  for (const proto of protocols) {
+  for (let proto of protocols) {
     if (proto.startsWith("auth-")) {
       try {
-        const decoded = Buffer.from(proto.slice(5), "base64").toString("utf8");
+        // Since we stripped padding '=', add it back for proper base64 decoding if needed
+        let b64 = proto.slice(5);
+        while (b64.length % 4 !== 0) b64 += "=";
+        
+        const decoded = Buffer.from(b64, "base64").toString("utf8");
         const password = decoded.includes(":") ? decoded.split(":").slice(1).join(":") : decoded;
         const passwordHash = crypto.createHash("sha256").update(password).digest();
         const expectedHash = crypto.createHash("sha256").update(SETUP_PASSWORD).digest();
